@@ -76,10 +76,6 @@ class InstalledRepository(Repository):
                             path = lib.joinpath(path).resolve()
                         paths.add(path)
 
-        src_path = env.path / "src" / name
-        if not paths and src_path.exists():
-            paths.add(src_path)
-
         return paths
 
     @classmethod
@@ -90,21 +86,16 @@ class InstalledRepository(Repository):
         return "git", info.origin, info.revision
 
     @classmethod
-    def is_vcs_package(cls, package: Path | Package, env: Env) -> bool:
+    def is_vcs_package(cls, package: Path, env: Env) -> bool:
         # A VCS dependency should have been installed
         # in the src directory.
         from poetry.vcs.git import Git
 
         src = env.path / "src"
-        if isinstance(package, Package):
-            return Git.is_valid_repo(src.joinpath(package.name))
-
-        try:
-            package.relative_to(env.path / "src")
-        except ValueError:
+        if src not in package.parents:
             return False
-        else:
-            return Git.is_valid_repo(package)
+
+        return Git.is_valid_repo(package)
 
     @classmethod
     def create_package_from_distribution(
@@ -129,20 +120,18 @@ class InstalledRepository(Repository):
         source_subdirectory = None
         if is_standard_package:
             if path.name.endswith(".dist-info"):
-                paths = cls.get_package_paths(
-                    env=env, name=distribution.metadata["name"]
-                )
-                if paths:
+                package_name = distribution.metadata["name"]
+                src_path = env.path / "src" / package_name
+                if src_path.exists() and cls.is_vcs_package(src_path, env):
+                    (
+                        source_type,
+                        source_url,
+                        source_reference,
+                    ) = cls.get_package_vcs_properties_from_path(src_path)
+                else:
+                    paths = cls.get_package_paths(env=env, name=package_name)
                     is_editable_package = False
                     for src in paths:
-                        if cls.is_vcs_package(src, env):
-                            (
-                                source_type,
-                                source_url,
-                                source_reference,
-                            ) = cls.get_package_vcs_properties_from_path(src)
-                            break
-
                         if not (
                             is_editable_package or env.is_path_relative_to_lib(src)
                         ):
